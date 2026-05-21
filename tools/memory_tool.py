@@ -115,7 +115,8 @@ class MemoryStore:
         Tool responses always reflect this live state.
     """
 
-    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375):
+    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375, user_id: str = None):
+        self.user_id = str(user_id).strip() if user_id else None
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
@@ -123,13 +124,19 @@ class MemoryStore:
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
 
+    @staticmethod
+    def _safe_user_filename_part(user_id: str) -> str:
+        """Return a stable filesystem-safe suffix for per-user memory files."""
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", user_id).strip("._-")
+        return safe or "unknown"
+
     def load_from_disk(self):
         """Load entries from MEMORY.md and USER.md, capture system prompt snapshot."""
         mem_dir = get_memory_dir()
         mem_dir.mkdir(parents=True, exist_ok=True)
 
-        self.memory_entries = self._read_file(mem_dir / "MEMORY.md")
-        self.user_entries = self._read_file(mem_dir / "USER.md")
+        self.memory_entries = self._read_file(self._path_for("memory"))
+        self.user_entries = self._read_file(self._path_for("user"))
 
         # Deduplicate entries (preserves order, keeps first occurrence)
         self.memory_entries = list(dict.fromkeys(self.memory_entries))
@@ -178,10 +185,12 @@ class MemoryStore:
                     pass
             fd.close()
 
-    @staticmethod
-    def _path_for(target: str) -> Path:
+    def _path_for(self, target: str) -> Path:
         mem_dir = get_memory_dir()
         if target == "user":
+            # User-specific file: USER_{user_id}.md for isolation, fallback to USER.md
+            if self.user_id:
+                return mem_dir / f"USER_{self._safe_user_filename_part(self.user_id)}.md"
             return mem_dir / "USER.md"
         return mem_dir / "MEMORY.md"
 

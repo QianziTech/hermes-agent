@@ -3029,6 +3029,8 @@ class FeishuAdapter(BasePlatformAdapter):
             reply_to_text=reply_to_text,
             timestamp=datetime.now(),
         )
+        # Inject user-specific OAuth token for lark-mcp (user isolation)
+        self._inject_user_token_for_mcp(sender_profile["user_id"])
         await self._dispatch_inbound_event(normalized)
 
     async def _dispatch_inbound_event(self, event: MessageEvent) -> None:
@@ -3040,6 +3042,49 @@ class FeishuAdapter(BasePlatformAdapter):
             await self._enqueue_media_event(event)
             return
         await self._handle_message_with_guards(event)
+
+    # =========================================================================
+    # User OAuth token injection for lark-mcp (user isolation)
+    # =========================================================================
+
+    _LARK_MCP_TOKEN_FILENAME = "feishu_user_token.json"
+    _USER_TOKEN_DIRNAME = "feishu_tokens"
+
+    def _inject_user_token_for_mcp(self, user_id: str) -> bool:
+        """Inject user-specific OAuth token for lark-mcp user isolation.
+
+        lark-mcp reads from a fixed path (FEISHU_USER_ACCESS_TOKEN_FILE).
+        We copy the user's token file to that path before each message dispatch
+        so MCP operations use the correct user's credentials.
+
+        Args:
+            user_id: The user's open_id (ou_xxx format)
+
+        Returns:
+            True if token was successfully injected, False otherwise
+        """
+        import shutil
+        from hermes_constants import get_hermes_home
+
+        if not user_id:
+            logger.debug("[Feishu] No user_id provided for token injection")
+            return False
+
+        hermes_home = get_hermes_home()
+        user_token_path = hermes_home / self._USER_TOKEN_DIRNAME / f"{user_id}.json"
+        mcp_token_path = hermes_home / self._LARK_MCP_TOKEN_FILENAME
+
+        if not user_token_path.exists():
+            logger.debug("[Feishu] No OAuth token found for user %s", user_id)
+            return False
+
+        try:
+            shutil.copy(user_token_path, mcp_token_path)
+            logger.info("[Feishu] Injected OAuth token for user %s into lark-mcp", user_id)
+            return True
+        except Exception as e:
+            logger.warning("[Feishu] Failed to inject token for user %s: %s", user_id, e)
+            return False
 
     # =========================================================================
     # Media batching

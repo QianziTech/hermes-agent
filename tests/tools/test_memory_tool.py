@@ -207,6 +207,34 @@ class TestMemoryStorePersistence:
         store.load_from_disk()
         assert len(store.memory_entries) == 2
 
+    def test_user_profile_is_scoped_by_user_id(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+
+        alice = MemoryStore(user_id="ou_alice")
+        bob = MemoryStore(user_id="ou/bob")
+        shared = MemoryStore()
+
+        alice.load_from_disk()
+        bob.load_from_disk()
+        shared.load_from_disk()
+        alice.add("user", "Alice prefers concise replies")
+        bob.add("user", "Bob prefers detailed replies")
+        shared.add("user", "Fallback profile")
+
+        alice_reloaded = MemoryStore(user_id="ou_alice")
+        bob_reloaded = MemoryStore(user_id="ou/bob")
+        shared_reloaded = MemoryStore()
+        alice_reloaded.load_from_disk()
+        bob_reloaded.load_from_disk()
+        shared_reloaded.load_from_disk()
+
+        assert alice_reloaded.user_entries == ["Alice prefers concise replies"]
+        assert bob_reloaded.user_entries == ["Bob prefers detailed replies"]
+        assert shared_reloaded.user_entries == ["Fallback profile"]
+        assert (tmp_path / "USER_ou_alice.md").exists()
+        assert (tmp_path / "USER_ou_bob.md").exists()
+        assert (tmp_path / "USER.md").exists()
+
 
 class TestMemoryStoreSnapshot:
     def test_snapshot_frozen_at_load(self, store):
